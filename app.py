@@ -38,7 +38,7 @@ if uploaded_file is not None:
         df.loc[i, 'longitude_dif(cm)'] = round(dx * 100, 4)
     
     # Download button for raw + difference DataFrame
-    st.subheader("📥 Download Parsed + Difference Data")
+    st.subheader("📥 Download Parsed + Pre-processed Data")
     csv_raw = df.to_csv(index=False).encode('utf-8')
     st.download_button(
         label="Download Preprocessed DataFrame (with lat/lon diff)",
