@@ -87,8 +87,8 @@ if uploaded_file is not None:
     # Module 3: UKF Filtering
     st.header("📉 Module 3: UKF Filtering")
 
-    scenario = st.radio("Select UKF Scenario:", ["Scenario I (With Attitude)", "Scenario II (IMU Only)"])
-    if scenario == "Scenario I (With Attitude)":
+    scenario = st.radio("Select UKF Scenario:", ["Scenario I (With Attitude (Yaw))", "Scenario II (without Yaw)"])
+    if scenario == "Scenario I (With Attitude (Yaw))":
     	include_attitude = True
     else:
     	include_attitude = False
