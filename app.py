@@ -48,7 +48,7 @@ if uploaded_file is not None:
     )
 
     # Module 2: Plot Signals
-    st.header("📈 Module 2: Visualize Raw & Difference Signals")
+    st.header("📈 Module 2: Visualize Raw & Other Signals")
     st.sidebar.header("🛠️ Plot Settings")
 
     x_axis = st.sidebar.radio("X-axis", ['Timestamp_seconds', 'Index'])
