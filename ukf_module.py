@@ -3,9 +3,28 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 def run_ukf(df, include_attitude=True, plot=True):
+        # --- Convert to meters and smooth GPS ---
     df['x'] = df['longitude_dif(cm)'] / 100.0
     df['y'] = df['latitude_dif(cm)'] / 100.0
 
+    # Remove outliers (Median Absolute Deviation)
+    def remove_outliers(series, threshold=3.5):
+        median = np.median(series)
+        diff = np.abs(series - median)
+        mad = np.median(diff)
+        z = 0.6745 * diff / mad if mad else 0
+        return np.where(z < threshold, series, np.nan)
+
+    df['x'] = remove_outliers(df['x'])
+    df['y'] = remove_outliers(df['y'])
+    df['x'] = pd.Series(df['x']).interpolate()
+    df['y'] = pd.Series(df['y']).interpolate()
+
+    # --- Smooth accelerometer data ---
+    df['xacc'] = df['xacc'].rolling(5, center=True).mean().bfill().ffill()
+    df['yacc'] = df['yacc'].rolling(5, center=True).mean().bfill().ffill()
+
+    # Extract values
     timestamps = df['Timestamp_seconds'].values
     yaw = np.deg2rad(df['yaw'].values)
     acc_x = df['xacc'].values
@@ -13,17 +32,21 @@ def run_ukf(df, include_attitude=True, plot=True):
     meas_x = df['x'].values
     meas_y = df['y'].values
 
+    # UKF parameters
     n = 5
     alpha, kappa, beta = 0.1, 0, 2.0
     lambda_ = alpha**2 * (n + kappa) - n
     gamma = np.sqrt(n + lambda_)
 
-    vx0 = (meas_x[1] - meas_x[0]) / (timestamps[1] - timestamps[0])
-    vy0 = (meas_y[1] - meas_y[0]) / (timestamps[1] - timestamps[0])
+    # Robust velocity init
+    vx0 = np.mean((meas_x[1:5] - meas_x[0:4]) / (timestamps[1:5] - timestamps[0:4]))
+    vy0 = np.mean((meas_y[1:5] - meas_y[0:4]) / (timestamps[1:5] - timestamps[0:4]))
     x = np.array([meas_x[0], meas_y[0], vx0, vy0, yaw[0]])
+
+    # Covariances
     P = np.eye(n)
-    Q = np.diag([0.01, 0.01, 0.1, 0.1, 0.001])
-    R = np.diag([3.0, 3.0, np.deg2rad(1.0)]) if include_attitude else np.diag([3.0, 3.0])
+    Q = np.diag([0.01, 0.01, 0.5, 0.5, 0.001])  # more noise on velocity
+    R = np.diag([1.5, 1.5, np.deg2rad(5.0)]) if include_attitude else np.diag([1.5, 1.5])  # less trust on yaw
 
     Wm = np.full(2 * n + 1, 1 / (2 * (n + lambda_)))
     Wc = Wm.copy()
@@ -46,8 +69,9 @@ def run_ukf(df, include_attitude=True, plot=True):
     def hx(x):
         return np.array([x[0], x[1], x[4]]) if include_attitude else np.array([x[0], x[1]])
 
+    # UKF Loop
     filtered = []
-    for i in range(1, len(df)):
+    for i in range(0, len(df)):
         dt = timestamps[i] - timestamps[i-1]
         ax, ay = acc_x[i], acc_y[i]
         z = np.array([meas_x[i], meas_y[i], yaw[i]]) if include_attitude else np.array([meas_x[i], meas_y[i]])
@@ -72,8 +96,7 @@ def run_ukf(df, include_attitude=True, plot=True):
         S = R.copy()
         for j in range(2 * n + 1):
             dz = Z_sigma[j] - z_pred
-            if include_attitude:
-                dz[2] = normalize_angle(dz[2])
+            if include_attitude: dz[2] = normalize_angle(dz[2])
             S += Wc[j] * np.outer(dz, dz)
 
         Cxz = np.zeros((n, len(z)))
@@ -81,23 +104,22 @@ def run_ukf(df, include_attitude=True, plot=True):
             dx = sigma_pred[j] - x_pred
             dx[4] = normalize_angle(dx[4])
             dz = Z_sigma[j] - z_pred
-            if include_attitude:
-                dz[2] = normalize_angle(dz[2])
+            if include_attitude: dz[2] = normalize_angle(dz[2])
             Cxz += Wc[j] * np.outer(dx, dz)
 
         K = Cxz @ np.linalg.inv(S)
         innovation = z - z_pred
-        if include_attitude:
-            innovation[2] = normalize_angle(innovation[2])
+        if include_attitude: innovation[2] = normalize_angle(innovation[2])
         x = x_pred + K @ innovation
         P = P_pred - K @ S @ K.T
         filtered.append(x.copy())
 
+    # Output DataFrame
     results_df = pd.DataFrame(filtered, columns=['x', 'y', 'vx', 'vy', 'theta'])
-    results_df['time'] = timestamps[1:len(filtered)+1]
+    results_df['time'] = timestamps[0:len(filtered)+1]
     results_df['Latitude'] = results_df['y']
     results_df['Longitude'] = results_df['x']
-
+    
     if plot:
         fig, axs = plt.subplots(1, 2, figsize=(12, 5))
 
